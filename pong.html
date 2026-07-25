@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Pong Ultimate</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    background:#111;
+    color:#fff;
+    font-family: monospace;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+  }
+  #gameContainer {
+    position:relative;
+    width:800px;
+    height:500px;
+    background:#000;
+    border:3px solid #fff;
+    overflow:hidden;
+    display:none;
+  }
+  #menu {
+    width:800px;
+    text-align:center;
+    font-size:18px;
+  }
+  #ascii {
+    white-space:pre;
+    font-size:14px;
+    margin-bottom:20px;
+  }
+  button {
+    background:#222;
+    color:#fff;
+    border:2px solid #fff;
+    padding:10px 20px;
+    margin:10px;
+    cursor:pointer;
+    font-size:18px;
+  }
+  #centerLine {
+    position:absolute;
+    left:50%; top:0;
+    width:4px; height:100%;
+    background: repeating-linear-gradient(
+      to bottom, #fff 0, #fff 10px, transparent 10px, transparent 20px
+    );
+    transform:translateX(-50%);
+    opacity:0.4;
+  }
+
+  .paddle {
+    position:absolute;
+    width:12px;
+    height:80px;
+    background:#fff;
+  }
+
+  #leftPaddle { left:20px; top:0; }
+  #rightPaddle { right:20px; top:0; }
+
+  #ball {
+    position:absolute;
+    width:14px; height:14px;
+    background:#f5f500;
+    border-radius:50%;
+  }
+
+  #trap {
+    position:absolute;
+    width:20px;
+    height:20px;
+    background:#ff0000;
+    color:#fff;
+    font-weight:bold;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    border-radius:4px;
+    display:none;
+  }
+
+  #scoreBoard {
+    position:absolute;
+    top:10px; left:50%;
+    transform:translateX(-50%);
+    font-size:26px;
+    letter-spacing:10px;
+  }
+
+  #info {
+    position:absolute;
+    bottom:10px; left:50%;
+    transform:translateX(-50%);
+    font-size:14px;
+    color:#ccc;
+    text-align:center;
+  }
+
+  #endMessage {
+    position:absolute;
+    top:50%; left:50%;
+    transform:translate(-50%, -50%);
+    font-size:30px;
+    display:none;
+    cursor:pointer;
+    text-align:center;
+    background:rgba(0,0,0,0.8);
+    padding:20px;
+    border:2px solid #fff;
+  }
+</style>
+</head>
+<body>
+
+<div id="menu">
+  <div id="ascii">
+    ____  ___   _   _  ____  
+   |  _ \/ _ \ | \ | |/ ___| 
+   | |_) | | | ||  \| || |  _  
+   |  __/| |_| || |\  || |_| | 
+   |_|    \___/ |_| \_| \____| 
+  </div>
+
+  <h2>PONG ULTIMATE</h2>
+  <p>Choisis ton mode :</p>
+
+  <button onclick="startGame(1,'normal')">1 Joueur (IA normale)</button>
+  <button onclick="startGame(1,'hard')">1 Joueur (IA difficile)</button>
+  <button onclick="startGame(2,'none')">2 Joueurs</button>
+</div>
+
+<div id="gameContainer">
+  <div id="centerLine"></div>
+  <div id="leftPaddle" class="paddle"></div>
+  <div id="rightPaddle" class="paddle"></div>
+  <div id="ball"></div>
+  <div id="trap">P</div>
+  <div id="scoreBoard">0 : 0</div>
+  <div id="info">Z/S — Joueur gauche<br>↑/↓ — Joueur droit</div>
+  <div id="endMessage"></div>
+</div>
+
+<script>
+let mode = 1;
+let aiLevel = "normal";
+
+let container, leftPaddle, rightPaddle, ball, scoreBoard, endMessage, trap;
+let gameWidth, gameHeight;
+
+let leftPaddleY, rightPaddleY;
+let ballX, ballY;
+let ballSpeedX = 0, ballSpeedY = 0;
+
+let trapX, trapY;
+
+let leftScore = 0;
+let rightScore = 0;
+const maxScore = 5;
+
+const keys = {};
+let gameStarted = false;
+
+function startGame(m, ai) {
+  mode = m;
+  aiLevel = ai;
+
+  document.getElementById("menu").style.display = "none";
+  document.getElementById("gameContainer").style.display = "block";
+
+  const rect = document.getElementById("gameContainer").getBoundingClientRect();
+  gameWidth = rect.width;
+  gameHeight = rect.height;
+
+  initGame();
+  gameStarted = true;
+  resetBall();
+  launchBall();
+
+  trap = document.getElementById("trap");
+  spawnTrap();
+}
+
+function initGame() {
+  container = document.getElementById('gameContainer');
+  leftPaddle = document.getElementById('leftPaddle');
+  rightPaddle = document.getElementById('rightPaddle');
+  ball = document.getElementById('ball');
+  scoreBoard = document.getElementById('scoreBoard');
+  endMessage = document.getElementById('endMessage');
+
+  endMessage.onclick = () => {
+    endMessage.style.display = "none";
+    leftScore = 0;
+    rightScore = 0;
+    scoreBoard.textContent = "0 : 0";
+    resetBall();
+    launchBall();
+    spawnTrap();
+  };
+
+  leftPaddleY = gameHeight/2 - 40;
+  rightPaddleY = gameHeight/2 - 40;
+}
+
+document.addEventListener('keydown', e => {
+  keys[e.key.toLowerCase()] = true;
+  if(["arrowup","arrowdown"].includes(e.key.toLowerCase())) e.preventDefault();
+});
+
+document.addEventListener('keyup', e => keys[e.key.toLowerCase()] = false);
+
+function clamp(v,min,max){ return Math.max(min,Math.min(max,v)); }
+
+function launchBall() {
+  const dirX = Math.random()<0.5 ? -1 : 1;
+  const dirY = (Math.random()*2 - 1);
+  const norm = Math.sqrt(dirX*dirX + dirY*dirY);
+  ballSpeedX = (dirX/norm)*5;
+  ballSpeedY = (dirY/norm)*5;
+}
+
+function resetBall() {
+  ballX = gameWidth/2 - ball.offsetWidth/2;
+  ballY = gameHeight/2 - ball.offsetHeight/2;
+}
+
+function spawnTrap() {
+  trapX = Math.random() * (gameWidth - 20);
+  trapY = Math.random() * (gameHeight - 20);
+
+  trap.style.left = trapX + "px";
+  trap.style.top = trapY + "px";
+  trap.style.display = "block";
+}
+
+function updatePaddles() {
+  if (!gameStarted) return;
+  if (endMessage.style.display === "block") return;
+
+  if (keys['z']) leftPaddleY -= 7;
+  if (keys['s']) leftPaddleY += 7;
+
+  if (mode === 2) {
+    if (keys['arrowup']) rightPaddleY -= 7;
+    if (keys['arrowdown']) rightPaddleY += 7;
+  } else {
+    let aiSpeed = aiLevel === "hard" ? 5 : 0.8;
+    let target = ballY - (rightPaddle.offsetHeight / 2);
+    rightPaddleY += (target - rightPaddleY) * 0.06 * aiSpeed;
+  }
+
+  leftPaddleY = clamp(leftPaddleY, 0, gameHeight - leftPaddle.offsetHeight);
+  rightPaddleY = clamp(rightPaddleY, 0, gameHeight - rightPaddle.offsetHeight);
+
+  leftPaddle.style.top = leftPaddleY + 'px';
+  rightPaddle.style.top = rightPaddleY + 'px';
+}
+
+function updateBall() {
+  if (!gameStarted) return;
+  if (endMessage.style.display === "block") return;
+
+  ballX += ballSpeedX;
+  ballY += ballSpeedY;
+
+  if (ballY <= 0) {
+    ballY = 0;
+    ballSpeedY *= -1;
+  }
+  if (ballY + ball.offsetHeight >= gameHeight) {
+    ballY = gameHeight - ball.offsetHeight;
+    ballSpeedY *= -1;
+  }
+
+  const lp = leftPaddle.getBoundingClientRect();
+  const rp = rightPaddle.getBoundingClientRect();
+  const rect = container.getBoundingClientRect();
+
+  const lpT = lp.top - rect.top;
+  const lpB = lp.bottom - rect.top;
+  const lpR = lp.right - rect.left;
+
+  const rpT = rp.top - rect.top;
+  const rpB = rp.bottom - rect.top;
+  const rpL = rp.left - rect.left;
+
+  const bL = ballX;
+  const bR = ballX + ball.offsetWidth;
+  const bT = ballY;
+  const bB = ballY + ball.offsetHeight;
+
+  // Collision palette gauche
+  if (bL <= lpR && bR >= lpR && bB >= lpT && bT <= lpB) {
+    let paddleCenter = lpT + leftPaddle.offsetHeight / 2;
+    let ballCenter = ballY + ball.offsetHeight / 2;
+    let relativeIntersectY = ballCenter - paddleCenter;
+    let normalized = relativeIntersectY / (leftPaddle.offsetHeight / 2);
+    let maxAngle = 4;
+    ballSpeedY = normalized * maxAngle;
+    ballSpeedX = Math.abs(ballSpeedX);
+  }
+
+  // Collision palette droite
+  if (bR >= rpL && bL <= rpL && bB >= rpT && bT <= rpB) {
+    let paddleCenter = rpT + rightPaddle.offsetHeight / 2;
+    let ballCenter = ballY + ball.offsetHeight / 2;
+    let relativeIntersectY = ballCenter - paddleCenter;
+    let normalized = relativeIntersectY / (rightPaddle.offsetHeight / 2);
+    let maxAngle = 4;
+    ballSpeedY = normalized * maxAngle;
+    ballSpeedX = -Math.abs(ballSpeedX);
+  }
+
+  // ⭐ Collision avec le piège
+  if (trap.style.display === "block") {
+    if (
+      ballX < trapX + 20 &&
+      ballX + ball.offsetWidth > trapX &&
+      ballY < trapY + 20 &&
+      ballY + ball.offsetHeight > trapY
+    ) {
+      ballSpeedX *= -1;
+      ballSpeedY = (Math.random() * 4) - 2;
+
+      if (ballSpeedX > 0) leftScore++;
+      else rightScore++;
+
+      scoreBoard.textContent = `${leftScore} : ${rightScore}`;
+
+      trap.style.display = "none";
+      setTimeout(spawnTrap, 1000);
+    }
+  }
+
+  // Score + victoire
+  if (ballX < 0) {
+    rightScore++;
+    scoreBoard.textContent = `${leftScore} : ${rightScore}`;
+
+    if (rightScore >= maxScore) {
+      endMessage.innerHTML = "Victoire du joueur droit !<br><span style='font-size:18px;'>Cliquer pour rejouer</span>";
+      endMessage.style.display = "block";
+      return;
+    }
+
+    resetBall();
+    launchBall();
+  } 
+  else if (ballX + ball.offsetWidth > gameWidth) {
+    leftScore++;
+    scoreBoard.textContent = `${leftScore} : ${rightScore}`;
+
+    if (leftScore >= maxScore) {
+      endMessage.innerHTML = "Victoire du joueur gauche !<br><span style='font-size:18px;'>Cliquer pour rejouer</span>";
+      endMessage.style.display = "block";
+      return;
+    }
+
+    resetBall();
+    launchBall();
+  }
+
+  ball.style.left = ballX + 'px';
+  ball.style.top = ballY + 'px';
+}
+
+function gameLoop() {
+  updatePaddles();
+  updateBall();
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+
+</body>
+</html>

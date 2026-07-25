@@ -1,0 +1,505 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<title>Tetris Ultimate 1.5</title>
+<style>
+  body {
+    background:#111;
+    color:#fff;
+    font-family: monospace;
+    display:flex;
+    justify-content:center;
+    align-items:center;
+    height:100vh;
+  }
+
+  #container {
+    display:flex;
+    gap:20px;
+  }
+
+  /* Tetris */
+  #game {
+    width:200px;
+    height:400px;
+    background:#000;
+    border:3px solid #fff;
+    display:grid;
+    grid-template-columns:repeat(10, 1fr);
+    grid-template-rows:repeat(20, 1fr);
+    position:relative;
+  }
+
+  .cell {
+    width:100%;
+    height:100%;
+    background:#222;
+  }
+
+  .filled1 { background:#0ff; }
+  .filled2 { background:#f00; }
+  .filled3 { background:#0f0; }
+  .filled4 { background:#ff0; }
+
+  /* Preview agrandie */
+  #previewBox {
+    width:160px;
+    height:160px;
+    border:3px solid #fff;
+    display:grid;
+    grid-template-columns:repeat(4, 1fr);
+    grid-template-rows:repeat(4, 1fr);
+    background:#000;
+  }
+
+  .previewCell {
+    width:100%;
+    height:100%;
+    background:#222;
+  }
+
+  .previewFilled {
+    background:#fff;
+  }
+
+  #middlePanel {
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:20px;
+  }
+
+  #counter {
+    font-size:16px;
+  }
+
+  /* Ennemi */
+  #enemyBox {
+    width:200px;
+    height:400px;
+    border:3px solid #fff;
+    display:flex;
+    flex-direction:column;
+    justify-content:flex-end;
+    align-items:center;
+    position:relative;
+    background:#000;
+    overflow:hidden;
+  }
+
+  #enemyHitText {
+    position:absolute;
+    top:10px;
+    font-size:22px;
+    color:#ff4444;
+    display:none;
+    font-weight:bold;
+  }
+
+  #lifeBar {
+    width:100%;
+    height:20px;
+    background:#400;
+    border:2px solid #fff;
+    margin-bottom:10px;
+    position:relative;
+  }
+
+  #lifeFill {
+    position:absolute;
+    top:0; left:0;
+    height:100%;
+    background:#f00;
+  }
+
+  #enemy {
+    font-size:60px;
+    margin-bottom:20px;
+    transition:transform 0.1s;
+  }
+
+  /* Carrés qui tombent sur le vilain */
+  .fallingBlock {
+    width:20px;
+    height:20px;
+    position:absolute;
+    background:#fff;
+    left:50%;
+    transform:translateX(-50%);
+  }
+
+  /* Attaque du vilain : carré noir dans le Tetris */
+  .enemyAttack {
+    width:20px;
+    height:20px;
+    background:#000;
+    position:absolute;
+    left:50%;
+    transform:translateX(-50%);
+    top:0;
+  }
+
+  /* Clignotement */
+  @keyframes blink {
+    0% { opacity:1; }
+    50% { opacity:0.2; }
+    100% { opacity:1; }
+  }
+
+  .enemyBlink {
+    animation: blink 0.3s linear 3;
+  }
+
+  /* Game Over */
+  #gameOver {
+    position:absolute;
+    top:50%; left:50%;
+    transform:translate(-50%, -50%);
+    background:#000;
+    padding:20px;
+    border:3px solid #fff;
+    font-size:24px;
+    display:none;
+  }
+
+  #endText {
+    font-size:22px;
+    text-align:center;
+    margin-bottom:10px;
+  }
+</style>
+</head>
+<body>
+
+<div id="container">
+
+  <!-- Tetris -->
+  <div id="game"></div>
+
+  <!-- Middle panel -->
+  <div id="middlePanel">
+    <div id="previewBox"></div>
+    <div id="counter">Vilains vaincus : 0</div>
+  </div>
+
+  <!-- Ennemi -->
+  <div id="enemyBox">
+    <div id="lifeBar"><div id="lifeFill"></div></div>
+    <div id="enemyHitText">AIE</div>
+    <div id="enemy">(ง'̀-'́)ง</div>
+  </div>
+
+</div>
+
+<div id="gameOver">
+  <div id="endText"></div>
+  <br>
+  F5 pour recommencer
+</div>
+
+<script>
+// Empêche le scroll avec flèches
+document.addEventListener("keydown", e => {
+  if (["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key)) {
+    e.preventDefault();
+  }
+});
+
+// Sons rétro
+const hitSound = new Audio("https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg");
+const attackSound = new Audio("https://actions.google.com/sounds/v1/cartoon/metal_twang.ogg");
+
+const game = document.getElementById("game");
+const previewBox = document.getElementById("previewBox");
+const lifeFill = document.getElementById("lifeFill");
+const counter = document.getElementById("counter");
+const enemy = document.getElementById("enemy");
+const hitText = document.getElementById("enemyHitText");
+const gameOver = document.getElementById("gameOver");
+
+// Grille 10x20
+let grid = Array.from({length:20},()=>Array(10).fill(0));
+
+// 4 couleurs
+const colors = [1,2,3,4];
+
+// Pièces
+const pieces = {
+  I:[[1,1,1,1]],
+  O:[[1,1],[1,1]],
+  T:[[0,1,0],[1,1,1]],
+  L:[[1,0],[1,0],[1,1]],
+  J:[[0,1],[0,1],[1,1]],
+  S:[[0,1,1],[1,1,0]],
+  Z:[[1,1,0],[0,1,1]]
+};
+
+let currentPiece, nextPiece;
+let currentColor, nextColor;
+let posX = 3, posY = 0;
+
+let enemyLife = Math.floor(Math.random()*17)+4;
+let enemyKilled = 0;
+
+function updateLifeBar() {
+  lifeFill.style.width = (enemyLife * 5) + "%";
+}
+
+updateLifeBar();
+
+function randomPiece() {
+  const keys = Object.keys(pieces);
+  return pieces[keys[Math.floor(Math.random()*keys.length)]];
+}
+
+function drawPreview() {
+  previewBox.innerHTML = "";
+  for (let y=0; y<4; y++) {
+    for (let x=0; x<4; x++) {
+      const cell = document.createElement("div");
+      cell.classList.add("previewCell");
+      if (nextPiece[y] && nextPiece[y][x] === 1) {
+        cell.classList.add("previewFilled");
+      }
+      previewBox.appendChild(cell);
+    }
+  }
+}
+
+function spawnPiece() {
+  currentPiece = nextPiece;
+  currentColor = nextColor;
+
+  nextPiece = randomPiece();
+  nextColor = colors[Math.floor(Math.random()*colors.length)];
+
+  posX = 3;
+  posY = 0;
+
+  drawPreview();
+
+  if (collision(0,0,currentPiece)) {
+    showFinalMessage();
+    gameOver.style.display = "block";
+    clearInterval(loop);
+    clearInterval(enemyAttackLoop);
+  }
+}
+
+function draw() {
+  game.innerHTML = "";
+  for (let y=0; y<20; y++) {
+    for (let x=0; x<10; x++) {
+      const cell = document.createElement("div");
+      cell.classList.add("cell");
+      if (grid[y][x] > 0) cell.classList.add("filled"+grid[y][x]);
+      game.appendChild(cell);
+    }
+  }
+
+  currentPiece.forEach((row, py)=>{
+    row.forEach((v, px)=>{
+      if (v === 1) {
+        const index = (posY+py)*10 + (posX+px);
+        if (index >= 0 && index < 200) {
+          game.children[index].classList.add("filled"+currentColor);
+        }
+      }
+    });
+  });
+}
+
+function collision(dx, dy, piece=currentPiece) {
+  for (let y=0; y<piece.length; y++) {
+    for (let x=0; x<piece[y].length; x++) {
+      if (piece[y][x] === 1) {
+        let nx = posX + x + dx;
+        let ny = posY + y + dy;
+        if (nx < 0 || nx >= 10 || ny >= 20) return true;
+        if (ny >= 0 && grid[ny][nx] > 0) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function mergePiece() {
+  currentPiece.forEach((row, py)=>{
+    row.forEach((v, px)=>{
+      if (v === 1) {
+        grid[posY+py][posX+px] = currentColor;
+      }
+    });
+  });
+}
+
+function enemyHitEffect() {
+  hitSound.play();
+
+  enemy.classList.add("enemyBlink");
+  enemy.style.transform = "translateY(-10px)";
+
+  hitText.style.display = "block";
+
+  setTimeout(() => {
+    enemy.classList.remove("enemyBlink");
+    enemy.style.transform = "translateY(0)";
+    hitText.style.display = "none";
+  }, 2000);
+}
+
+function dropBlocksOnEnemy(count) {
+  for (let i=0; i<count; i++) {
+    const block = document.createElement("div");
+    block.classList.add("fallingBlock");
+    block.style.top = "-20px";
+
+    document.getElementById("enemyBox").appendChild(block);
+
+    let y = -20;
+    const fall = setInterval(()=>{
+      y += 10;
+      block.style.top = y + "px";
+
+      if (y >= 350) {
+        clearInterval(fall);
+        block.remove();
+      }
+    }, 30);
+  }
+}
+
+function clearLines() {
+  let linesThisTurn = 0;
+  let y = 19;
+
+  while (y >= 0) {
+    if (grid[y].every(v => v > 0)) {
+      linesThisTurn++;
+
+      grid.splice(y, 1);
+      grid.unshift(Array(10).fill(0));
+
+      // on reste sur le même y, car la ligne au-dessus vient de descendre ici
+    } else {
+      y--;
+    }
+  }
+
+  if (linesThisTurn > 0) {
+    dropBlocksOnEnemy(linesThisTurn);
+    enemyHitEffect();
+
+    enemyLife -= linesThisTurn;
+
+    if (enemyLife <= 0) {
+      enemyKilled++;
+      counter.textContent = "Vilains vaincus : " + enemyKilled;
+      enemyLife = Math.floor(Math.random()*17)+4;
+    }
+
+    updateLifeBar();
+  }
+}
+
+
+function rotate() {
+  const rotated = currentPiece[0].map((_,i)=>currentPiece.map(r=>r[i]).reverse());
+  if (!collision(0,0,rotated)) currentPiece = rotated;
+}
+
+// ZQSD
+document.addEventListener("keydown", e=>{
+  const key = e.key.toLowerCase();
+
+  if (key === "q" && !collision(-1,0)) posX--;
+  if (key === "d" && !collision(1,0)) posX++;
+  if (key === "z") rotate();
+  if (key === "s" && !collision(0,1)) posY++;
+});
+
+function gameLoop() {
+  if (!collision(0,1)) {
+    posY++;
+  } else {
+    mergePiece();
+    clearLines();
+    spawnPiece();
+  }
+  draw();
+}
+
+nextPiece = randomPiece();
+nextColor = colors[Math.floor(Math.random()*colors.length)];
+spawnPiece();
+
+const loop = setInterval(gameLoop, 500);
+
+/* Attaque du vilain : carré noir qui détruit un bloc du Tetris */
+function enemyAttack() {
+  attackSound.play();
+
+  const atk = document.createElement("div");
+  atk.classList.add("enemyAttack");
+  atk.style.top = "0px";
+
+  // Le carré noir tombe dans la grille Tetris
+  game.appendChild(atk);
+
+  let y = 0;
+  const fall = setInterval(()=>{
+    y += 10;
+    atk.style.top = y + "px";
+
+    if (y >= 380) {
+      clearInterval(fall);
+      atk.remove();
+
+      // Détruit un bloc aléatoire dans la grille
+      let rx = Math.floor(Math.random()*10);
+      let ry = Math.floor(Math.random()*20);
+      grid[ry][rx] = 0;
+      draw();
+    }
+  }, 30);
+}
+
+// Attaque toutes les 10 secondes
+const enemyAttackLoop = setInterval(enemyAttack, 10000);
+
+function showFinalMessage() {
+  const endText = document.getElementById("endText");
+
+  let msg = "";
+
+  if (enemyKilled < 5) {
+    msg = `Vous êtes nul, vous n'avez battu que ${enemyKilled} vilains.`;
+  }
+  else if (enemyKilled < 10) {
+    msg = `Vous avez battu ${enemyKilled} vilains, vous pouvez mieux faire.`;
+  }
+  else if (enemyKilled < 20) {
+    msg = `Vous avez battu ${enemyKilled} vilains, c'est pas mal.`;
+  }
+  else if (enemyKilled < 40) {
+    msg = `Félicitations, vous avez battu ${enemyKilled} vilains !`;
+  }
+  else if (enemyKilled < 80) {
+    msg = `Bravo ! Vous avez battu ${enemyKilled} vilains !`;
+  }
+  else if (enemyKilled < 1000) {
+    msg = `Incroyable ! Vous avez battu ${enemyKilled} vilains !`;
+  }
+  else {
+    msg = `Vous avez battu ${enemyKilled} vilains… votre performance est DIVINE.`;
+  }
+
+  endText.textContent = msg;
+}
+
+draw();
+</script>
+
+</body>
+</html>

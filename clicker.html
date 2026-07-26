@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>Jeu de cibles</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      background: #222;
+      color: #fff;
+      display: flex;
+    }
+
+    /* Zone historique */
+    #history {
+      width: 200px;
+      background: #111;
+      padding: 15px;
+      border-right: 2px solid #444;
+      overflow-y: auto;
+      height: 100vh;
+    }
+
+    #history h2 {
+      margin-top: 0;
+      font-size: 1.2em;
+      text-align: center;
+    }
+
+    #historyList {
+      font-size: 0.9em;
+      line-height: 1.4em;
+    }
+
+    /* Zone centrale */
+    #main {
+      flex: 1;
+      text-align: center;
+      padding: 10px;
+    }
+
+    #maxBox {
+      width: 200px;
+      margin: 0 auto;
+      padding: 10px;
+      background: #111;
+      border: 2px solid #555;
+      font-size: 1.3em;
+      margin-bottom: 10px;
+    }
+
+    #score, #timer, #shots {
+      font-size: 1.4em;
+      margin: 5px;
+    }
+
+    #gameArea {
+      position: relative;
+      margin: 0 auto;
+      margin-top: 20px;
+      width: 600px;
+      height: 400px;
+      background: #333;
+      border: 2px solid #555;
+      overflow: hidden;
+      cursor: crosshair;
+    }
+
+    .target {
+      position: absolute;
+      width: 50px;
+      height: 50px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #ff4444 0%, #aa0000 70%);
+      box-shadow: 0 0 10px #ff4444;
+    }
+
+    #startBtn {
+      margin-top: 10px;
+      padding: 8px 16px;
+      font-size: 1em;
+      cursor: pointer;
+    }
+
+    #message {
+      margin-top: 10px;
+      font-size: 1.2em;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- HISTORIQUE -->
+  <div id="history">
+    <h2>Historique</h2>
+    <div id="historyList"></div>
+  </div>
+
+  <!-- ZONE DE JEU -->
+  <div id="main">
+
+    <!-- MAXIMUM ATTEINT -->
+    <div id="maxBox">Maximum atteint : 0</div>
+
+    <div id="score">Score : 0</div>
+    <div id="timer">Temps : 30 s</div>
+    <div id="shots">Tirs restants : 20</div>
+    <button id="startBtn">Démarrer la partie</button>
+    <div id="message"></div>
+
+    <div id="gameArea"></div>
+  </div>
+
+  <script>
+    const gameArea = document.getElementById('gameArea');
+    const scoreEl = document.getElementById('score');
+    const timerEl = document.getElementById('timer');
+    const shotsEl = document.getElementById('shots');
+    const startBtn = document.getElementById('startBtn');
+    const messageEl = document.getElementById('message');
+    const historyList = document.getElementById('historyList');
+    const maxBox = document.getElementById('maxBox');
+
+    let score = 0;
+    let maxScore = 0;
+    let timeLeft = 30;
+    let shotsLeft = 20;
+    let gameInterval = null;
+    let timerInterval = null;
+    let gameRunning = false;
+
+    function updateScore() {
+      scoreEl.textContent = 'Score : ' + score;
+
+      if (score > maxScore) {
+        maxScore = score;
+        maxBox.textContent = "Maximum atteint : " + maxScore;
+      }
+    }
+
+    function updateTimer() {
+      timerEl.textContent = 'Temps : ' + timeLeft + ' s';
+    }
+
+    function updateShots() {
+      shotsEl.textContent = 'Tirs restants : ' + shotsLeft;
+    }
+
+    function addHistory(text) {
+      const entry = document.createElement('div');
+      entry.textContent = text;
+      historyList.appendChild(entry);
+    }
+
+    function createTarget() {
+      const oldTarget = document.querySelector('.target');
+      if (oldTarget) oldTarget.remove();
+
+      const target = document.createElement('div');
+      target.classList.add('target');
+
+      const size = 50;
+      const maxX = gameArea.clientWidth - size;
+      const maxY = gameArea.clientHeight - size;
+
+      const x = Math.floor(Math.random() * maxX);
+      const y = Math.floor(Math.random() * maxY);
+
+      target.style.left = x + 'px';
+      target.style.top = y + 'px';
+
+      target.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (!gameRunning || shotsLeft <= 0) return;
+
+        shotsLeft--;
+        updateShots();
+
+        score++;
+        updateScore();
+        addHistory("Touché ! Score : " + score);
+
+        if (score % 10 === 0) {
+          shotsLeft += 10;
+          updateShots();
+          addHistory("Bonus +10 tirs !");
+        }
+
+        createTarget();
+      });
+
+      gameArea.appendChild(target);
+    }
+
+    // Tir dans le vide
+    gameArea.addEventListener('click', () => {
+      if (!gameRunning || shotsLeft <= 0) return;
+
+      shotsLeft--;
+      updateShots();
+      addHistory("Tir dans le vide (-1)");
+
+      if (shotsLeft <= 0) {
+        endGame();
+      }
+    });
+
+    function startGame() {
+      if (gameRunning) return;
+
+      gameRunning = true;
+      score = 0;
+      timeLeft = 30;
+      shotsLeft = 20;
+
+      historyList.innerHTML = "";
+
+      updateScore();
+      updateTimer();
+      updateShots();
+      messageEl.textContent = '';
+
+      createTarget();
+
+      gameInterval = setInterval(createTarget, 800);
+
+      timerInterval = setInterval(() => {
+        timeLeft--;
+        updateTimer();
+        if (timeLeft <= 0 || shotsLeft <= 0) {
+          endGame();
+        }
+      }, 1000);
+    }
+
+    function endGame() {
+      gameRunning = false;
+      clearInterval(gameInterval);
+      clearInterval(timerInterval);
+
+      const target = document.querySelector('.target');
+      if (target) target.remove();
+
+      messageEl.textContent = 'Fin de partie ! Score final : ' + score;
+      addHistory("=== FIN — Score final : " + score + " ===");
+    }
+
+    startBtn.addEventListener('click', startGame);
+  </script>
+
+</body>
+</html>

@@ -1,0 +1,617 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Combat de Chats - Invincibilité & Vitesse</title>
+<style>
+  :root{
+    --bg:#0b1020;
+    --panel:#0f1724;
+    --accent:#ffb86b;
+    --text:#e6eef8;
+  }
+  html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Arial;background:linear-gradient(180deg,#071026 0%, #0b1020 100%);color:var(--text)}
+  #game{
+    display:flex;flex-direction:column;height:100vh;
+    align-items:center;justify-content:flex-start;padding:12px;box-sizing:border-box;
+  }
+  header{width:100%;max-width:1100px;display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  h1{font-size:18px;margin:0;color:var(--accent)}
+  .panel{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));border:1px solid rgba(255,255,255,0.03);padding:10px;border-radius:8px;color:var(--text)}
+  #hud{display:flex;gap:12px;align-items:center}
+  #canvasWrap{width:100%;max-width:1100px;flex:1;display:flex;align-items:center;justify-content:center}
+  canvas{background:linear-gradient(180deg,#0b1530,#071026);border-radius:10px;box-shadow:0 6px 30px rgba(0,0,0,0.6)}
+  #info{display:flex;gap:8px;align-items:center}
+  .bar{height:12px;background:#1b2430;border-radius:6px;overflow:hidden;width:160px}
+  .bar > i{display:block;height:100%;background:linear-gradient(90deg,#ff6b6b,#ffb86b);width:100%}
+  #menu{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(2,6,12,0.6);backdrop-filter:blur(4px)}
+  .menuBox{width:920px;max-width:95%;padding:18px;border-radius:12px;background:linear-gradient(180deg,#071428,#0b1b2a);border:1px solid rgba(255,255,255,0.03)}
+  .catGrid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:12px}
+  .catCard{background:linear-gradient(180deg,rgba(255,255,255,0.02),transparent);padding:8px;border-radius:8px;display:flex;gap:8px;align-items:center;cursor:pointer;border:1px solid rgba(255,255,255,0.02)}
+  .catCard:hover{transform:translateY(-4px);transition:transform .15s}
+  .dotPreview{width:64px;height:64px;background:#071428;border-radius:8px;display:flex;align-items:center;justify-content:center}
+  .controls{margin-top:12px;display:flex;gap:8px;align-items:center;justify-content:space-between}
+  button{background:var(--accent);border:none;padding:8px 12px;border-radius:8px;color:#071428;font-weight:600;cursor:pointer}
+  .small{font-size:13px;color:#bcd3f0}
+  #message{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:rgba(0,0,0,0.5);padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,0.03)}
+  @media (max-width:700px){
+    .catGrid{grid-template-columns:repeat(2,1fr)}
+    .bar{width:120px}
+  }
+</style>
+</head>
+<body>
+<div id="game">
+  <header>
+    <h1>Combat de Chats</h1>
+    <div id="hud" class="panel">
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div class="small">Vie</div>
+        <div class="bar"><i id="hpFill" style="width:100%"></i></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div class="small">Adversaires restants</div>
+        <div style="font-weight:700" id="remaining">11</div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <div class="small">Kills</div>
+        <div style="font-weight:700" id="kills">0</div>
+      </div>
+    </div>
+  </header>
+
+  <div id="canvasWrap">
+    <canvas id="stage" width="1000" height="600"></canvas>
+  </div>
+
+  <div id="info" style="margin-top:8px">
+    <div class="panel small">Déplace avec la souris • Clic gauche = Technique 1 • Clic droit = Technique 2</div>
+    <div style="flex:1"></div>
+    <div class="panel small">2s d'invincibilité après coup • Vitesse modulée selon distance</div>
+  </div>
+</div>
+
+<div id="menu">
+  <div class="menuBox">
+    <div style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <h2 style="margin:0;color:var(--accent)">Choisis ton chat</h2>
+        <div class="small" style="margin-top:6px">Chaque chat a 2 techniques uniques. Clique pour sélectionner.</div>
+      </div>
+      <div>
+        <button id="startBtn" disabled>Commencer</button>
+      </div>
+    </div>
+
+    <div class="catGrid" id="catGrid"></div>
+
+    <div class="controls">
+      <div class="small">Astuce: clic droit pour la technique secondaire (menu contextuel désactivé).</div>
+      <div class="small">Victoire quand tu as éliminé les 11 autres.</div>
+    </div>
+  </div>
+</div>
+
+<div id="message" style="display:none"></div>
+
+<script>
+/* Jeu de combat de chats - Ajouts :
+   - 2s d'invincibilité après coup + clignotement
+   - vitesse du joueur modulée par la distance à la souris
+   - compteur de kills affiché dans le HUD
+*/
+
+const CAT_DEFS = [
+  {id:'Ari', color:'#ff9aa2', tech1:'Griffe', tech2:'QueueFouet'},
+  {id:'Bisc', color:'#ffd3b6', tech1:'BoulePoil', tech2:'SautEclair'},
+  {id:'Cendre', color:'#c7ceea', tech1:'OndeSonore', tech2:'MiaouSonic'},
+  {id:'Dune', color:'#b5ead7', tech1:'GriffesPluie', tech2:'Charge'},
+  {id:'Etoile', color:'#f3c4fb', tech1:'Tourbillon', tech2:'LaserYeux'},
+  {id:'Fumee', color:'#d3d3d3', tech1:'BombePoils', tech2:'Camouflage'},
+  {id:'Gly', color:'#ffd6e0', tech1:'PattesFoudre', tech2:'Morsure'},
+  {id:'Hoshi', color:'#cfe8ff', tech1:'OndeGlace', tech2:'SautLunaire'},
+  {id:'Iris', color:'#ffe6a7', tech1:'Poussiere', tech2:'CoupDePatte'},
+  {id:'Jinx', color:'#e0c3fc', tech1:'Eclair', tech2:'Furie'},
+  {id:'Kumo', color:'#b8f2e6', tech1:'Filet', tech2:'Roulade'},
+  {id:'Luna', color:'#f7d6e0', tech1:'Hypnose', tech2:'Explosion'}
+];
+
+const canvas = document.getElementById('stage');
+const ctx = canvas.getContext('2d');
+const W = canvas.width, H = canvas.height;
+let mouse = {x: W/2, y: H/2};
+let selectedCatIndex = null;
+const menu = document.getElementById('menu');
+const catGrid = document.getElementById('catGrid');
+const startBtn = document.getElementById('startBtn');
+const hpFill = document.getElementById('hpFill');
+const remainingEl = document.getElementById('remaining');
+const killsEl = document.getElementById('kills');
+const messageEl = document.getElementById('message');
+
+function rand(min,max){return Math.random()*(max-min)+min}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+
+function drawDotCatToCanvas(ctx, x, y, size, color, seed=0){
+  const s = size;
+  ctx.save();
+  ctx.translate(x,y);
+  for(let i=-s/2;i<s/2;i+=4){
+    for(let j=-s/2;j<s/2;j+=4){
+      const d = Math.hypot(i,j);
+      const p = Math.sin((i+seed)*0.3)+Math.cos((j+seed)*0.2);
+      if(d < s*0.45 && p> -0.5){
+        ctx.fillStyle = color;
+        ctx.fillRect(i,j,3,3);
+      }
+    }
+  }
+  ctx.fillStyle = '#071428';
+  ctx.fillRect(-s*0.12,-s*0.05,4,6);
+  ctx.fillRect(s*0.12,-s*0.05,4,6);
+  ctx.fillStyle = color;
+  ctx.fillRect(-s*0.35,-s*0.45,6,8);
+  ctx.fillRect(s*0.29,-s*0.45,6,8);
+  ctx.restore();
+}
+
+CAT_DEFS.forEach((c,i)=>{
+  const card = document.createElement('div');
+  card.className='catCard';
+  card.innerHTML = `
+    <div class="dotPreview" id="preview${i}"></div>
+    <div style="flex:1">
+      <div style="font-weight:700">${c.id}</div>
+      <div class="small">Tech1: ${c.tech1} • Tech2: ${c.tech2}</div>
+    </div>
+  `;
+  card.onclick = ()=> {
+    document.querySelectorAll('.catCard').forEach(n=>n.style.outline='');
+    card.style.outline='2px solid rgba(255,184,107,0.25)';
+    selectedCatIndex = i;
+    startBtn.disabled = false;
+  };
+  catGrid.appendChild(card);
+  const pv = document.getElementById('preview'+i);
+  const cvs = document.createElement('canvas');
+  cvs.width=64;cvs.height=64;
+  pv.appendChild(cvs);
+  const cctx = cvs.getContext('2d');
+  cctx.fillStyle='#071428';cctx.fillRect(0,0,64,64);
+  drawDotCatToCanvas(cctx,32,32,44,c.color,i*13);
+});
+
+class Cat {
+  constructor(def, x,y, isPlayer=false){
+    this.def = def;
+    this.x = x; this.y = y;
+    this.vx = 0; this.vy = 0;
+    this.hp = 100;
+    this.maxHp = 100;
+    this.size = 28;
+    this.isPlayer = isPlayer;
+    this.cool1 = 0; this.cool2 = 0;
+    this.alive = true;
+    this.id = def.id;
+    this.color = def.color;
+    this.target = null;
+    this.kills = 0;
+    this.aiTimer = rand(0,2);
+    this.invincible = 0; // temps d'invincibilité en secondes
+  }
+  takeDamage(d, attacker){
+    if(!this.alive) return;
+    // si invincible, ignorer
+    if(this.invincible > 0) return;
+    this.hp -= d;
+    // si c'est le joueur, déclencher invincibilité
+    if(this.isPlayer){
+      this.invincible = 2.0; // 2 secondes d'invincibilité
+    }
+    if(this.hp<=0){
+      this.alive=false;
+      if(attacker && attacker.isPlayer) attacker.kills++;
+    }
+  }
+  draw(ctx){
+    if(!this.alive) return;
+    drawDotCatToCanvas(ctx, this.x, this.y, this.size, this.color, this.id.length*7);
+    ctx.fillStyle='rgba(0,0,0,0.5)';
+    ctx.fillRect(this.x-30,this.y-40,60,8);
+    ctx.fillStyle='#ff6b6b';
+    ctx.fillRect(this.x-30,this.y-40,60*(this.hp/this.maxHp),8);
+    ctx.strokeStyle='rgba(255,255,255,0.06)';
+    ctx.strokeRect(this.x-30,this.y-40,60,8);
+  }
+}
+
+const projectiles = [];
+
+class Projectile {
+  constructor(x,y,vx,vy,life,owner, type, power, radius){
+    this.x=x;this.y=y;this.vx=vx;this.vy=vy;this.life=life;this.owner=owner;this.type=type;this.power=power;this.radius=radius||6;
+  }
+  update(dt){
+    this.x += this.vx*dt;
+    this.y += this.vy*dt;
+    this.life -= dt;
+  }
+  draw(ctx){
+    if(this.type==='slash'){
+      ctx.fillStyle='rgba(255,200,120,0.9)';
+      ctx.beginPath();ctx.ellipse(this.x,this.y,this.radius*1.6,this.radius,0,0,Math.PI*2);ctx.fill();
+    } else if(this.type==='ball'){
+      ctx.fillStyle='rgba(255,255,255,0.9)';
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+    } else if(this.type==='wave'){
+      ctx.fillStyle='rgba(180,220,255,0.9)';
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+    } else if(this.type==='cloud'){
+      ctx.fillStyle='rgba(200,180,255,0.9)';
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+    } else {
+      ctx.fillStyle='rgba(255,255,255,0.8)';
+      ctx.beginPath();ctx.arc(this.x,this.y,this.radius,0,Math.PI*2);ctx.fill();
+    }
+  }
+}
+
+function useTechnique(cat, techIndex){
+  if(!cat.alive) return;
+  if(techIndex===1 && cat.cool1>0) return;
+  if(techIndex===2 && cat.cool2>0) return;
+
+  const tname = techIndex===1 ? cat.def.tech1 : cat.def.tech2;
+  const owner = cat;
+  const angleToTarget = (owner.isPlayer ? Math.atan2(mouse.y-owner.y, mouse.x-owner.x) : Math.atan2((player.y-owner.y),(player.x-owner.x)));
+  switch(tname){
+    case 'Griffe':
+      projectiles.push(new Projectile(owner.x+Math.cos(angleToTarget)*20, owner.y+Math.sin(angleToTarget)*20, 0,0,0.25,owner,'slash',18,18));
+      owner.cool1 = owner.isPlayer ? 0.6 : 1.0;
+      break;
+    case 'QueueFouet':
+      for(let i=-1;i<=1;i++){
+        const a = angleToTarget + i*0.3;
+        projectiles.push(new Projectile(owner.x,owner.y,Math.cos(a)*260,Math.sin(a)*260,1.2,owner,'ball',10,8));
+      }
+      owner.cool1 = 1.6;
+      break;
+    case 'BoulePoil':
+      projectiles.push(new Projectile(owner.x,owner.y,Math.cos(angleToTarget)*140,Math.sin(angleToTarget)*140,1.6,owner,'cloud',14,12));
+      owner.cool1 = 1.8;
+      break;
+    case 'SautEclair':
+      owner.vx += Math.cos(angleToTarget)*300;
+      owner.vy += Math.sin(angleToTarget)*300;
+      owner.cool1 = 1.2;
+      break;
+    case 'OndeSonore':
+      projectiles.push(new Projectile(owner.x,owner.y,0,0,0.8,owner,'wave',22,60));
+      owner.cool1 = 2.2;
+      break;
+    case 'MiaouSonic':
+      projectiles.push(new Projectile(owner.x,owner.y,0,0,0.6,owner,'wave',12,70));
+      owner.cool1 = 2.6;
+      break;
+    case 'GriffesPluie':
+      for(let i=0;i<6;i++){
+        const a = angleToTarget + (i-3)*0.15;
+        projectiles.push(new Projectile(owner.x+Math.cos(a)*10,owner.y+Math.sin(a)*10,Math.cos(a)*320,Math.sin(a)*320,0.9,owner,'slash',6,6));
+      }
+      owner.cool1 = 2.0;
+      break;
+    case 'Charge':
+      owner.vx += Math.cos(angleToTarget)*420;
+      owner.vy += Math.sin(angleToTarget)*420;
+      owner.cool1 = 2.4;
+      break;
+    case 'Tourbillon':
+      for(let i=0;i<8;i++){
+        const a = i*(Math.PI*2/8);
+        projectiles.push(new Projectile(owner.x+Math.cos(a)*10,owner.y+Math.sin(a)*10,Math.cos(a)*200,Math.sin(a)*200,1.4,owner,'ball',8,7));
+      }
+      owner.cool1 = 2.8;
+      break;
+    case 'LaserYeux':
+      projectiles.push(new Projectile(owner.x,owner.y,Math.cos(angleToTarget)*900,Math.sin(angleToTarget)*900,0.4,owner,'slash',28,10));
+      owner.cool1 = 3.0;
+      break;
+    case 'BombePoils':
+      for(let i=0;i<3;i++){
+        const a = angleToTarget + (i-1)*0.25;
+        projectiles.push(new Projectile(owner.x,owner.y,Math.cos(a)*160,Math.sin(a)*160,1.6,owner,'cloud',12,14));
+      }
+      owner.cool1 = 2.2;
+      break;
+    case 'Camouflage':
+      owner._camouflage = 2.0;
+      owner.cool1 = 6.0;
+      break;
+    case 'PattesFoudre':
+      projectiles.push(new Projectile(owner.x,owner.y,Math.cos(angleToTarget)*360,Math.sin(angleToTarget)*360,0.9,owner,'ball',16,9));
+      owner.cool1 = 1.6;
+      break;
+    case 'Morsure':
+      projectiles.push(new Projectile(owner.x+Math.cos(angleToTarget)*18,owner.y+Math.sin(angleToTarget)*18,0,0,0.2,owner,'slash',20,18));
+      owner.cool1 = 1.4;
+      break;
+    case 'OndeGlace':
+      projectiles.push(new Projectile(owner.x,owner.y,0,0,1.0,owner,'wave',10,80));
+      owner.cool1 = 2.8;
+      break;
+    case 'SautLunaire':
+      owner.vy -= 260; owner.vx += Math.cos(angleToTarget)*120;
+      owner.cool1 = 1.8;
+      break;
+    case 'Poussiere':
+      for(let i=0;i<10;i++){
+        const a = Math.random()*Math.PI*2;
+        projectiles.push(new Projectile(owner.x,owner.y,Math.cos(a)*rand(40,220),Math.sin(a)*rand(40,220),1.2,owner,'cloud',6,6));
+      }
+      owner.cool1 = 2.0;
+      break;
+    case 'CoupDePatte':
+      projectiles.push(new Projectile(owner.x+Math.cos(angleToTarget)*20,owner.y+Math.sin(angleToTarget)*20,Math.cos(angleToTarget)*420,Math.sin(angleToTarget)*420,0.6,owner,'slash',18,10));
+      owner.cool1 = 1.2;
+      break;
+    case 'Eclair':
+      projectiles.push(new Projectile(owner.x,owner.y,Math.cos(angleToTarget)*520,Math.sin(angleToTarget)*520,0.5,owner,'ball',20,7));
+      owner.cool1 = 1.6;
+      break;
+    case 'Furie':
+      for(let i=0;i<12;i++){
+        const a = i*(Math.PI*2/12);
+        projectiles.push(new Projectile(owner.x,owner.y,Math.cos(a)*rand(120,360),Math.sin(a)*rand(120,360),0.9,owner,'slash',7,6));
+      }
+      owner.cool1 = 3.0;
+      break;
+    case 'Filet':
+      projectiles.push(new Projectile(owner.x,owner.y,Math.cos(angleToTarget)*220,Math.sin(angleToTarget)*220,1.6,owner,'cloud',8,12));
+      owner.cool1 = 2.4;
+      break;
+    case 'Roulade':
+      owner.vx += Math.cos(angleToTarget)*260; owner.vy += Math.sin(angleToTarget)*260;
+      owner.cool1 = 1.0;
+      break;
+    case 'Hypnose':
+      projectiles.push(new Projectile(owner.x,owner.y,0,0,1.2,owner,'wave',0,90));
+      owner.cool1 = 4.0;
+      break;
+    case 'Explosion':
+      projectiles.push(new Projectile(owner.x,owner.y,0,0,0.6,owner,'cloud',30,90));
+      owner.cool1 = 5.0;
+      break;
+    default:
+      projectiles.push(new Projectile(owner.x,owner.y,Math.cos(angleToTarget)*300,Math.sin(angleToTarget)*300,1.0,owner,'ball',10,8));
+      owner.cool1 = 1.2;
+  }
+
+  if(techIndex===2){
+    if(!owner.cool2 || owner.cool2<owner.cool1) owner.cool2 = owner.cool1 + 0.6;
+  }
+}
+
+let player = null;
+let cats = [];
+let running = false;
+let gameOver = false;
+
+function startGame(){
+  cats = [];
+  const chosen = CAT_DEFS[selectedCatIndex];
+  player = new Cat(chosen, W/2, H/2, true);
+  player.color = chosen.color;
+  cats.push(player);
+
+  const pool = CAT_DEFS.filter((c,i)=>i!==selectedCatIndex);
+  for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]]}
+  for(let i=0;i<11;i++){
+    const def = pool[i%pool.length];
+    const x = rand(60,W-60), y = rand(60,H-60);
+    const ai = new Cat(def,x,y,false);
+    cats.push(ai);
+  }
+  menu.style.display='none';
+  startBtn.disabled = true;
+  remainingEl.textContent = 11;
+  killsEl.textContent = 0;
+  showMessage("Combat lancé ! Battez les 11 autres chats !");
+  running = true;
+  gameOver = false;
+}
+
+canvas.addEventListener('mousemove', (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  mouse.x = (e.clientX - rect.left) * (canvas.width/rect.width);
+  mouse.y = (e.clientY - rect.top) * (canvas.height/rect.height);
+});
+
+canvas.addEventListener('mousedown', (e)=>{
+  if(!player || !player.alive) return;
+  if(e.button===0){
+    useTechnique(player,1);
+  } else if(e.button===2){
+    useTechnique(player,2);
+  }
+});
+canvas.addEventListener('contextmenu', (e)=> e.preventDefault());
+
+function update(dt){
+  if(!running || !player) return;
+
+  cats.forEach(c=>{
+    if(c.cool1>0) c.cool1 = Math.max(0, c.cool1 - dt);
+    if(c.cool2>0) c.cool2 = Math.max(0, c.cool2 - dt);
+    if(c._camouflage) c._camouflage = Math.max(0, c._camouflage - dt);
+    if(c.invincible > 0) c.invincible = Math.max(0, c.invincible - dt);
+  });
+
+  cats.forEach(c=>{
+    if(!c.alive || c.isPlayer) return;
+    c.aiTimer -= dt;
+    const dx = player.x - c.x, dy = player.y - c.y;
+    const dist = Math.hypot(dx,dy);
+    if(dist>10){
+      c.vx += (dx/dist)*60*dt;
+      c.vy += (dy/dist)*60*dt;
+    }
+    if(c.aiTimer<=0){
+      c.aiTimer = rand(0.6,2.2);
+      if(Math.random()<0.6){
+        useTechnique(c,1);
+      } else {
+        useTechnique(c,2);
+      }
+    }
+  });
+
+  for(let i=projectiles.length-1;i>=0;i--){
+    const p = projectiles[i];
+    p.update(dt);
+    cats.forEach(c=>{
+      if(!c.alive) return;
+      if(p.owner===c) return;
+      const d = Math.hypot(c.x - p.x, c.y - p.y);
+      if(d < p.radius + c.size*0.4){
+        if(p.type==='slash' || p.type==='ball'){
+          c.takeDamage(p.power, p.owner);
+        } else if(p.type==='wave'){
+          c.takeDamage(p.power, p.owner);
+          c.vx *= 0.6; c.vy *= 0.6;
+        } else if(p.type==='cloud'){
+          c.takeDamage(p.power, p.owner);
+          c.vx *= 0.8; c.vy *= 0.8;
+        }
+        p.life = -1;
+      }
+    });
+    if(p.life<=0) projectiles.splice(i,1);
+  }
+
+  cats.forEach(c=>{
+    if(!c.alive) return;
+    if(c.isPlayer){
+      // modulation de la vitesse selon la distance à la souris
+      const dx = mouse.x - c.x, dy = mouse.y - c.y;
+      const dist = Math.hypot(dx,dy);
+      // plus la souris est loin, plus le multiplicateur augmente
+      // formule: speedMult = clamp(0.6 + dist/200, 0.6, 3)
+      const speedMult = clamp(0.6 + dist/200, 0.6, 3.0);
+      // appliquer mouvement proportionnel à la distance et au multiplicateur
+      c.vx += dx * (2.2 * speedMult) * dt;
+      c.vy += dy * (2.2 * speedMult) * dt;
+    }
+    c.vx *= 0.98; c.vy *= 0.98;
+    c.x += c.vx*dt;
+    c.y += c.vy*dt;
+    c.x = clamp(c.x, 30, W-30);
+    c.y = clamp(c.y, 30, H-30);
+  });
+
+  for(let i=0;i<cats.length;i++){
+    for(let j=i+1;j<cats.length;j++){
+      const a=cats[i], b=cats[j];
+      if(!a.alive || !b.alive) continue;
+      const d = Math.hypot(a.x-b.x, a.y-b.y);
+      if(d < (a.size*0.6 + b.size*0.6)){
+        const nx = (b.x-a.x)/d, ny = (b.y-a.y)/d;
+        const overlap = (a.size*0.6 + b.size*0.6) - d;
+        a.x -= nx*overlap*0.5; a.y -= ny*overlap*0.5;
+        b.x += nx*overlap*0.5; b.y += ny*overlap*0.5;
+        const rel = Math.hypot(a.vx-b.vx, a.vy-b.vy);
+        if(rel>120){
+          a.takeDamage(6, b.vx> a.vx ? b : null);
+          b.takeDamage(6, a.vx> b.vx ? a : null);
+        }
+      }
+    }
+  }
+
+  // Mise à jour HUD
+  if(player){
+    hpFill.style.width = Math.max(0, (player.hp/player.maxHp*100)) + '%';
+    killsEl.textContent = player.kills;
+  }
+  const aliveOpp = cats.filter(c=>!c.isPlayer && c.alive).length;
+  remainingEl.textContent = aliveOpp;
+
+  if(player && player.alive && aliveOpp===0){
+    showMessage("Victoire ! Tu as battu les 11 autres chats !");
+    gameOver = true;
+    running = false;
+  }
+  if(player && !player.alive){
+    showMessage("Défaite... Ton chat est tombé.");
+    gameOver = true;
+    running = false;
+  }
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  ctx.fillStyle='rgba(255,255,255,0.02)';
+  for(let x=20;x<W;x+=40){
+    for(let y=20;y<H;y+=40){
+      ctx.fillRect(x,y,1,1);
+    }
+  }
+  projectiles.forEach(p=>p.draw(ctx));
+  cats.forEach(c=>{
+    if(c.isPlayer) return;
+    ctx.save();
+    if(c._camouflage) ctx.globalAlpha = 0.35;
+    c.draw(ctx);
+    ctx.restore();
+  });
+  if(player){
+    ctx.save();
+    // clignotement si invincible : alterne alpha rapidement
+    if(player.invincible > 0){
+      const blink = Math.floor(player.invincible * 8) % 2 === 0 ? 0.18 : 1.0;
+      ctx.globalAlpha = blink;
+    } else if(player._camouflage){
+      ctx.globalAlpha = 0.35;
+    }
+    player.draw(ctx);
+    ctx.restore();
+  }
+}
+
+let msgTimer = 0;
+function showMessage(txt, t=4000){
+  messageEl.style.display='block';
+  messageEl.textContent = txt;
+  msgTimer = t;
+}
+
+let last = performance.now();
+function loop(now){
+  const frameMs = now - last;
+  const dt = Math.min(0.05, frameMs/1000);
+  last = now;
+
+  if(running && !gameOver){
+    update(dt);
+  }
+  draw();
+
+  if(msgTimer>0){
+    msgTimer -= frameMs;
+    if(msgTimer<=0){ messageEl.style.display='none'; msgTimer=0; }
+  }
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+startBtn.addEventListener('click', ()=>{
+  if(selectedCatIndex===null) return;
+  startGame();
+});
+
+showMessage("Sélectionne un chat puis clique sur Commencer.", 6000);
+
+</script>
+</body>
+</html>
